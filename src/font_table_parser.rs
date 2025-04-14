@@ -9,9 +9,11 @@ fn bit_is_set(flag: u8, bit: u8) -> bool {
     return (flag >> bit) & 1 == 1;
 }
 
+const FONT_SIZE_FACTOR: f32 = 10.0; // larger means the smaller font
 fn get_coordinates(
     reader: &mut FontReader,
     flags: &Vec<u8>,
+    window_size: Vec2,
 ) -> Result<Vec<Vec2>, Box<dyn std::error::Error>> {
     let mut short_vector_bit = 1;
     let mut sign_or_skip_bit = 4;
@@ -30,9 +32,9 @@ fn get_coordinates(
             } else {
                 -1.0
             };
-            coordinates[i].x += coordinate * sign;
+            coordinates[i].x += (coordinate * sign)/FONT_SIZE_FACTOR;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
-            coordinates[i].x += reader.read_i16()? as f32;
+            coordinates[i].x += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
         }
     }
 
@@ -52,10 +54,17 @@ fn get_coordinates(
             } else {
                 -1.0
             };
-            coordinates[i].y += coordinate * sign;
+            coordinates[i].y += (coordinate * sign)/FONT_SIZE_FACTOR;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
-            coordinates[i].y += reader.read_i16()? as f32;
+            coordinates[i].y += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
         }
+    }
+
+    // with respect to origin
+    let first_point = coordinates[0];
+    for point in coordinates.iter_mut() {
+        point.x -= first_point.x + window_size.x/2.25;
+        point.y -= first_point.y - window_size.y/4.0;
     }
 
     Ok(coordinates)
@@ -66,7 +75,7 @@ pub struct FontTableParser {
     pub reader: FontReader,
     pub font_table: HashMap<String, u64>,
     pub glyph_locations: Vec<u64>,
-    pub glyphs_data: Vec<Vec<Vec2>>,
+    pub glyph_data: Vec<(Vec<Vec2>, Vec<u16>)>, // (coordinates, contour_end_points)
 }
 
 impl FontTableParser {
@@ -101,7 +110,7 @@ impl FontTableParser {
         self.reader.go_to(loca_table_loc);
         for _ in 0..num_glyphs {
             let glyph_offset = if is_two_byte_entry {
-                (self.reader.read_u16()? * 2) as u64 // two byte format has halved offset so we multiply by 2
+                self.reader.read_u16()? as u64 * 2 // two byte format has halved offset so we multiply by 2
             } else {
                 self.reader.read_u32()? as u64
             };
@@ -114,14 +123,14 @@ impl FontTableParser {
 
     pub fn get_glyph_data(
         &mut self,
+        window_size: Vec2,
     ) -> Result<(), Box<dyn std::error::Error>> {
         for glyf_location in self.glyph_locations.iter() {
             self.reader.go_to(*glyf_location);
 
             let n_contours = self.reader.read_i16()? as usize;
             if n_contours == usize::MAX {
-                // compound glyph
-                continue;
+                continue;  // compound glyph
             }
 
             let mut contour_end_pts = Vec::with_capacity(n_contours);
@@ -135,25 +144,25 @@ impl FontTableParser {
             self.reader.skip_bytes(instructions_length as u64); // skip instructions 
 
             let flag_capacity: usize = *contour_end_pts.last().unwrap_or(&0) as usize + 1;
-            let mut flags: Vec<u8> = vec![0; flag_capacity];
+            let mut flags: Vec<u8> = Vec::with_capacity(flag_capacity);
 
-            for mut i in 0..flag_capacity {
+            let mut i = 0;
+            while i < flag_capacity {
+                i += 1;
                 let flag = self.reader.read_byte()?;
-                flags[i] = flag;
+                flags.push(flag);
 
                 if bit_is_set(flag, 3) {
                     for _ in 0..self.reader.read_byte()? {
-                        flags[i] = flag;
+                        flags.push(flag);
                         i += 1;
-                        if flags.capacity() == flags.len() {
-                            break;
-                        }
                     }
                 }
+                
             }
 
-            let coordinates = get_coordinates(&mut self.reader, &flags)?;
-            self.glyphs_data.push(coordinates);
+            let coordinates = get_coordinates(&mut self.reader, &flags, window_size)?;
+            self.glyph_data.push((coordinates, contour_end_pts));
         }
 
         Ok(())
