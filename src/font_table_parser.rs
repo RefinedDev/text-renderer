@@ -70,12 +70,17 @@ fn get_coordinates(
     Ok(coordinates)
 }
 
+pub struct Glyph {
+    pub coordinates: Vec<Vec2>,
+    pub contour_end_pts: Vec<u16>,
+}
+
 #[derive(Default)]
 pub struct FontTableParser {
     pub reader: FontReader,
     pub font_table: HashMap<String, u64>,
     pub glyph_locations: Vec<u64>,
-    pub glyph_data: Vec<(Vec<Vec2>, Vec<u16>)>, // (coordinates, contour_end_points)
+    pub glyphs: Vec<Glyph>,
 }
 
 impl FontTableParser {
@@ -162,7 +167,7 @@ impl FontTableParser {
             }
 
             let coordinates = get_coordinates(&mut self.reader, &flags, window_size)?;
-            self.glyph_data.push((coordinates, contour_end_pts));
+            self.glyphs.push(Glyph { coordinates, contour_end_pts });
         }
 
         Ok(())
