@@ -14,16 +14,17 @@ fn get_coordinates(
     reader: &mut FontReader,
     flags: &Vec<u8>,
     window_size: Vec2,
-) -> Result<Vec<Vec2>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(Vec2, bool)>, Box<dyn std::error::Error>> {
     let mut short_vector_bit = 1;
     let mut sign_or_skip_bit = 4;
-    let mut coordinates: Vec<Vec2> = vec![Vec2::ZERO; flags.len()];
+    let mut coordinates: Vec<(Vec2, bool)> = vec![(Vec2::ZERO, false); flags.len()];
 
     // FOR X
     for i in 0..coordinates.capacity() {
-        coordinates[i].x = coordinates[i16::max(0, (i as i16) - 1) as usize].x;
+        coordinates[i].0.x = coordinates[i16::max(0, (i as i16) - 1) as usize].0.x;
         let flag = flags[i];
-        let _on_curve = bit_is_set(flag, 0);
+        let on_curve = bit_is_set(flag, 0);
+        coordinates[i].1 = on_curve;
 
         if bit_is_set(flag, short_vector_bit) {
             let coordinate = reader.read_byte()? as f32;
@@ -32,9 +33,9 @@ fn get_coordinates(
             } else {
                 -1.0
             };
-            coordinates[i].x += (coordinate * sign)/FONT_SIZE_FACTOR;
+            coordinates[i].0.x += (coordinate * sign)/FONT_SIZE_FACTOR;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
-            coordinates[i].x += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
+            coordinates[i].0.x += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
         }
     }
 
@@ -43,9 +44,10 @@ fn get_coordinates(
 
     // FOR Y
     for i in 0..coordinates.capacity() {
-        coordinates[i].y = coordinates[i16::max(0, (i as i16) - 1) as usize].y;
+        coordinates[i].0.y = coordinates[i16::max(0, (i as i16) - 1) as usize].0.y;
         let flag = flags[i];
-        let _on_curve = bit_is_set(flag, 0);
+        let on_curve = bit_is_set(flag, 0);
+        coordinates[i].1 = on_curve;
 
         if bit_is_set(flag, short_vector_bit) {
             let coordinate = reader.read_byte()? as f32;
@@ -54,15 +56,15 @@ fn get_coordinates(
             } else {
                 -1.0
             };
-            coordinates[i].y += (coordinate * sign)/FONT_SIZE_FACTOR;
+            coordinates[i].0.y += (coordinate * sign)/FONT_SIZE_FACTOR;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
-            coordinates[i].y += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
+            coordinates[i].0.y += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
         }
     }
 
     // with respect to origin
-    let first_point = coordinates[0];
-    for point in coordinates.iter_mut() {
+    let first_point = coordinates[0].0;
+    for (point, _) in coordinates.iter_mut() {
         point.x -= first_point.x + window_size.x/2.25;
         point.y -= first_point.y - window_size.y/4.0;
     }
@@ -71,7 +73,7 @@ fn get_coordinates(
 }
 
 pub struct Glyph {
-    pub coordinates: Vec<Vec2>,
+    pub coordinates: Vec<(Vec2, bool)>, // bool is for on_curve parameter
     pub contour_end_pts: Vec<u16>,
 }
 
@@ -126,7 +128,7 @@ impl FontTableParser {
         Ok(())
     }
 
-    pub fn get_glyph_data(
+    pub fn get_glyphs(
         &mut self,
         window_size: Vec2,
     ) -> Result<(), Box<dyn std::error::Error>> {

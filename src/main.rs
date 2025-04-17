@@ -7,15 +7,10 @@ use font_reader::FontReader;
 use font_table_parser::{FontTableParser, Glyph};
 
 use bevy::{
-    asset::RenderAssetUsages,
     color::palettes::css::WHITE,
     input::mouse::AccumulatedMouseScroll,
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-
-#[derive(Resource)]
-struct BlackBoard(Handle<Image>);
 
 #[derive(Resource)]
 struct GlyphData(Vec<Glyph>);
@@ -25,35 +20,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_window, spawn).chain())
         .add_systems(Update, (render_text, zoom_cam, go_to_cursor).chain())
+        .insert_resource(ClearColor(Color::BLACK))
         .run();
 
     Ok(())
 }
 
+const CURVE_RES: usize = 10;
+fn quadratic_curve(a: Vec2, b: Vec2, c: Vec2, alpha: f32) -> Vec2 {
+    let p0 = a.lerp(b, alpha);
+    let p1 = b.lerp(c, alpha);
+    p0.lerp(p1, alpha)
+}
+
+fn draw_bezier(a: Vec2, b: Vec2, c: Vec2, gizmos: &mut Gizmos) {
+    let mut previous_point = a;
+    for i in 0..CURVE_RES {
+        let alpha = (i+1) as f32/CURVE_RES as f32;
+        let next_point = quadratic_curve(a, b, c, alpha);
+        gizmos.line_2d(previous_point, next_point, WHITE);
+        previous_point = next_point;
+    }
+}
+
 fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>) {
     let mut padding = Vec2::new(0.0, 0.0);
 
-    for glyph_index in 0..50 {
+    for glyph_index in 0..150 {
         let glyph_coords = &glyph_data.0[glyph_index].coordinates;
         let glyph_contours = &glyph_data.0[glyph_index].contour_end_pts;
 
-        let mut starting_point = 0;
-        for contour_end_point in glyph_contours.iter() {
-            let final_point = *contour_end_point as usize;
-            gizmos.line_2d(
-                glyph_coords[final_point] + padding,
-                glyph_coords[starting_point] + padding,
-                WHITE,
-            ); // to complete the loop
-            while starting_point < final_point {
-                gizmos.line_2d(
-                    glyph_coords[starting_point] + padding,
-                    glyph_coords[starting_point + 1] + padding,
-                    WHITE,
-                );
-                starting_point += 1;
+        let mut contour_start = 0;
+        let mut new_contours: Vec<Vec<Vec2>> = Vec::with_capacity(glyph_contours.len());
+
+        for contour_end in glyph_contours.iter() {
+            let old_contour = glyph_coords[contour_start..(*contour_end as usize + 1)].to_vec();
+
+            let mut first_oncurve_offset = 0;
+            while first_oncurve_offset < old_contour.len() {
+                if old_contour[first_oncurve_offset].1 {
+                    break;
+                }
+                first_oncurve_offset += 1;
             }
-            starting_point += 1; // final point + 1
+
+            let mut contour_with_implied_points: Vec<Vec2> = Vec::with_capacity(old_contour.len());
+
+            let mut i = 0;
+            while i < old_contour.len() {
+                let a = old_contour[i+first_oncurve_offset];
+                let b = old_contour[(i+first_oncurve_offset+1)%old_contour.len()];
+
+                contour_with_implied_points.push(a.0);
+                if a.1 == b.1 {
+                    contour_with_implied_points.push(a.0.midpoint(b.0));   
+                }
+                
+                i += 1;
+            }
+
+            contour_start = *contour_end as usize + 1;
+            new_contours.push(contour_with_implied_points);
+        }
+        
+        for contour in new_contours.iter() {
+            let mut i = 0;
+            while i < contour.len() {
+                let a = contour[i];
+                let b = contour[(i+1)%contour.len()];
+                let c = contour[(i+2)%contour.len()];
+                draw_bezier(a+padding, b+padding, c+padding, &mut gizmos);
+                i+=2;
+            }
         }
 
         padding.x += 100.0;
@@ -64,23 +102,8 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>) {
     }
 }
 
-fn spawn(window: Single<&Window>, mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+fn spawn(window: Single<&Window>, mut commands: Commands) {
     commands.spawn(Camera2d);
-    let image = Image::new_fill(
-        Extent3d {
-            width: window.size().x as u32,
-            height: window.size().y as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &(Color::linear_rgb(0.0, 0.0, 0.0).to_srgba().to_u8_array()),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-
-    let handle = images.add(image);
-    commands.spawn(Sprite::from_image(handle.clone()));
-    commands.insert_resource(BlackBoard(handle));
 
     let reader = FontReader::new("JetBrainsMono-Bold.ttf").unwrap();
     let mut table_parser = FontTableParser {
@@ -89,7 +112,7 @@ fn spawn(window: Single<&Window>, mut commands: Commands, mut images: ResMut<Ass
     };
     table_parser.get_lookup_table().unwrap();
     table_parser.get_glyph_location().unwrap();
-    table_parser.get_glyph_data(window.size()).unwrap();
+    table_parser.get_glyphs(window.size()).unwrap();
     commands.insert_resource(GlyphData(table_parser.glyphs));
 }
 
