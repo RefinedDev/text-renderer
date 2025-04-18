@@ -52,4 +52,8 @@ impl FontReader {
     pub fn go_to(&mut self, pos: u64) {
         self.cursor.set_position(pos);
     }
+
+    pub fn get_location(&self) -> u64 {
+        self.cursor.position()
+    }
 }
