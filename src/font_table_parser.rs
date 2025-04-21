@@ -9,11 +9,11 @@ fn bit_is_set(flag: u8, bit: u8) -> bool {
     return (flag >> bit) & 1 == 1;
 }
 
-const FONT_SIZE_FACTOR: f32 = 10.0; // larger means the smaller font
 fn get_coordinates(
     reader: &mut FontReader,
     flags: &Vec<u8>,
     window_size: Vec2,
+    font_size: f32,
 ) -> Result<Vec<(Vec2, bool)>, Box<dyn std::error::Error>> {
     let mut short_vector_bit = 1;
     let mut sign_or_skip_bit = 4;
@@ -33,9 +33,9 @@ fn get_coordinates(
             } else {
                 -1.0
             };
-            coordinates[i].0.x += (coordinate * sign)/FONT_SIZE_FACTOR;
+            coordinates[i].0.x += (coordinate * sign)*font_size;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
-            coordinates[i].0.x += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
+            coordinates[i].0.x += (reader.read_i16()? as f32)*font_size;
         }
     }
 
@@ -56,17 +56,16 @@ fn get_coordinates(
             } else {
                 -1.0
             };
-            coordinates[i].0.y += (coordinate * sign)/FONT_SIZE_FACTOR;
+            coordinates[i].0.y += (coordinate * sign)*font_size;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
-            coordinates[i].0.y += (reader.read_i16()? as f32)/FONT_SIZE_FACTOR;
+            coordinates[i].0.y += (reader.read_i16()? as f32)*font_size;
         }
     }
 
-    // with respect to origin
-    let first_point = coordinates[0].0;
+    // move towards (0,0)
     for (point, _) in coordinates.iter_mut() {
-        point.x -= first_point.x + window_size.x/2.25;
-        point.y -= first_point.y - window_size.y/4.0;
+        point.x -= window_size.x/2.25;
+        point.y -= -window_size.y/4.0;
     }
 
     Ok(coordinates)
@@ -76,18 +75,20 @@ fn get_coordinates(
 pub struct Glyph {
     pub coordinates: Vec<(Vec2, bool)>, // bool is for on_curve parameter
     pub contour_end_pts: Vec<u16>,
+    pub font_size: f32,
 }
 
 #[derive(Default)]
-pub struct FontTableParser {
+pub struct FontData {
     pub reader: FontReader,
     pub font_table: HashMap<String, u64>,
     pub glyph_locations: Vec<u64>,
     pub glyphs: Vec<Glyph>,
     pub unicodes_to_index: HashMap<u32, usize>,
+    pub glyph_spaces: Vec<u16>,
 }
 
-impl FontTableParser {
+impl FontData {
     pub fn get_lookup_table(&mut self) -> std::io::Result<()> {
         self.reader.skip_bytes(4); // skip scaler type
         let n_tables = self.reader.read_u16()?;
@@ -134,6 +135,12 @@ impl FontTableParser {
         &mut self,
         window_size: Vec2,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // GET FONT SIZE BEFORE THAT
+        let prev_location = self.reader.get_location();
+        self.reader.go_to(self.font_table["head"] + 18);
+        let font_size = 84.0/self.reader.read_u16()? as f32;
+        self.reader.go_to(prev_location);
+
         for glyf_location in self.glyph_locations.iter() {
             self.reader.go_to(*glyf_location);
 
@@ -171,8 +178,8 @@ impl FontTableParser {
                 
             }
 
-            let coordinates = get_coordinates(&mut self.reader, &flags, window_size)?;
-            self.glyphs.push(Glyph { coordinates, contour_end_pts });
+            let coordinates = get_coordinates(&mut self.reader, &flags, window_size, font_size)?;
+            self.glyphs.push(Glyph { coordinates, contour_end_pts, font_size });
         }
 
         Ok(())
@@ -286,6 +293,31 @@ impl FontTableParser {
         }       
 
         self.unicodes_to_index = unicode_to_index_map;
+        Ok(())
+    }
+
+    pub fn get_glyph_spacings(&mut self) -> std::io::Result<()> {
+        self.reader.go_to(self.font_table["hhea"] + 34); // skip alot of stuff
+        let num_long_hor_metrics = self.reader.read_u16()?;
+
+        self.reader.go_to(self.font_table["hmtx"]);
+        let mut advance_widths = Vec::with_capacity(self.glyphs.len());
+
+        for _ in 0..num_long_hor_metrics {
+            advance_widths.push(self.reader.read_u16()?);
+            self.reader.skip_bytes(2);
+        }
+
+        // some fonts include a run of mono-spaced glyphs at the end
+        // they all share the same advanced width value as whatever we read last
+        let num_monospaced = self.glyphs.len() - num_long_hor_metrics as usize;
+        let monospace_aw = advance_widths[num_monospaced];
+        
+        for _ in 0..num_monospaced {
+            advance_widths.push(monospace_aw);
+        }
+        
+        self.glyph_spaces = advance_widths;
         Ok(())
     }
 }

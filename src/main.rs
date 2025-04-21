@@ -5,7 +5,7 @@ use core::f32;
 use std::collections::HashMap;
 
 use font_reader::FontReader;
-use font_table_parser::{FontTableParser, Glyph};
+use font_table_parser::{FontData, Glyph};
 
 use bevy::{
     color::palettes::css::WHITE,
@@ -18,6 +18,9 @@ struct GlyphData(Vec<Glyph>);
 
 #[derive(Resource)]
 struct GlyphUnicode(HashMap<u32, usize>);
+
+#[derive(Resource)]
+struct GlyphSpaces(Vec<u16>);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     App::new()
@@ -47,15 +50,23 @@ fn draw_bezier(a: Vec2, b: Vec2, c: Vec2, gizmos: &mut Gizmos) {
     }
 }
 
-fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: Res<GlyphUnicode>) {
+fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: Res<GlyphUnicode>, glyph_spaces: Res<GlyphSpaces>) {
     let mut padding = Vec2::new(0.0, 0.0);
 
     let mut i = 1;
-    for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrtuvwxyz123456789!@#$%^*()[]".chars().into_iter() {
+    for char in "The quick brown fox jumps over the lazy dog".chars().into_iter() {
+        if char == ' ' {
+            if padding.x != 0.0 {
+                padding.x += 30.0;
+            }
+            continue;
+        }
         let unicode = char as u32;
         let glyph_index = glyph_unicodes.0[&unicode];
         let glyph_coords = &glyph_data.0[glyph_index].coordinates;
         let glyph_contours = &glyph_data.0[glyph_index].contour_end_pts;
+        let glyph_advanced_width = &glyph_spaces.0[glyph_index];
+        let font_size = &glyph_data.0[glyph_index].font_size;
 
         let mut contour_start = 0;
         for contour_end in glyph_contours.iter() {
@@ -101,8 +112,8 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
             }
         }
         
-        padding.x += 100.0;
-        if i % 10 == 0 {
+        padding.x += *glyph_advanced_width as f32*font_size;
+        if i % 21 == 0 {
             padding.x = 0.0;
             padding.y -= 100.0;
         }
@@ -113,17 +124,21 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
 fn spawn(window: Single<&Window>, mut commands: Commands) {
     commands.spawn(Camera2d);
 
-    let reader = FontReader::new("JetBrainsMono-Bold.ttf").unwrap();
-    let mut table_parser = FontTableParser {
+    let reader = FontReader::new("boldfont.ttf").unwrap();
+    let mut font_data_parser = FontData {
         reader,
         ..default()
     };
-    table_parser.get_lookup_table().unwrap();
-    table_parser.get_glyph_location().unwrap();
-    table_parser.get_glyphs(window.size()).unwrap();
-    table_parser.map_glyph_to_unicode().unwrap();
-    commands.insert_resource(GlyphData(table_parser.glyphs));
-    commands.insert_resource(GlyphUnicode(table_parser.unicodes_to_index));
+
+    font_data_parser.get_lookup_table().unwrap();
+    font_data_parser.get_glyph_location().unwrap();
+    font_data_parser.get_glyphs(window.size()).unwrap();
+    font_data_parser.map_glyph_to_unicode().unwrap();
+    font_data_parser.get_glyph_spacings().unwrap();
+   
+    commands.insert_resource(GlyphData(font_data_parser.glyphs));
+    commands.insert_resource(GlyphUnicode(font_data_parser.unicodes_to_index));
+    commands.insert_resource(GlyphSpaces(font_data_parser.glyph_spaces));
 }
 
 fn zoom_cam(
