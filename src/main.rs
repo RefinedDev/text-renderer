@@ -8,7 +8,7 @@ use font_reader::FontReader;
 use font_table_parser::{FontData, Glyph};
 
 use bevy::{
-    color::palettes::css::WHITE,
+    color::palettes::css::{GREEN, RED, WHITE},
     input::mouse::AccumulatedMouseScroll,
     prelude::*,
 };
@@ -64,32 +64,33 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
         let unicode = char as u32;
         let glyph_index = glyph_unicodes.0[&unicode];
         let glyph_coords = &glyph_data.0[glyph_index].coordinates;
-        let glyph_contours = &glyph_data.0[glyph_index].contour_end_pts;
+        let contour_end_points = &glyph_data.0[glyph_index].contour_end_pts;
         let glyph_advanced_width = &glyph_spaces.0[glyph_index];
         let font_size = &glyph_data.0[glyph_index].font_size;
 
         let mut contour_start = 0;
-        for contour_end in glyph_contours.iter() {
+        for contour_end in contour_end_points.iter() {
             /*
                 first we loop over the points in the contour and if two consecutive points are oncurve or offcurve, we insert 
                 an implied offcurve or oncurve point which will help us control the bezier curve
              */
             let old_contour = &glyph_coords[contour_start..(*contour_end as usize + 1)];
+            let oc_size = old_contour.len();
 
             let mut first_oncurve_offset = 0; // sometimes the first point isnt on_curve
-            while first_oncurve_offset < old_contour.len() {
-                if old_contour[first_oncurve_offset].1 {
+            while first_oncurve_offset < oc_size { // we need to find the first on_curve point
+                if old_contour[first_oncurve_offset].1 { // break if that point is on curve
                     break;
                 }
                 first_oncurve_offset += 1;
             }
 
-            let mut contour_with_implied_points: Vec<Vec2> = Vec::with_capacity(old_contour.len());
+            let mut contour_with_implied_points: Vec<Vec2> = Vec::with_capacity(oc_size);
 
             let mut i = 0;
-            while i < old_contour.len() {
-                let a = old_contour[(i+first_oncurve_offset)%old_contour.len()];
-                let b = old_contour[(i+first_oncurve_offset+1)%old_contour.len()];
+            while i < oc_size {
+                let a = old_contour[(i+first_oncurve_offset)%oc_size];
+                let b = old_contour[(i+first_oncurve_offset+1)%oc_size];
 
                 contour_with_implied_points.push(a.0);
                 if a.1 == b.1 { // both points either on or off curve, then we insert a midpoint as a control point for bezier
@@ -108,6 +109,9 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
                 let b = contour_with_implied_points[(i+1)%contour_with_implied_points.len()];
                 let c = contour_with_implied_points[(i+2)%contour_with_implied_points.len()];
                 draw_bezier(a+padding, b+padding, c+padding, &mut gizmos);
+                gizmos.circle_2d(a+padding, 0.5, RED);
+                gizmos.circle_2d(b+padding, 0.5, GREEN);
+                gizmos.circle_2d(c+padding, 0.5, RED);
                 i+=2;
             }
         }

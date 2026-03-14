@@ -89,6 +89,7 @@ pub struct FontData {
 }
 
 impl FontData {
+    //https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6.html
     pub fn get_lookup_table(&mut self) -> std::io::Result<()> {
         self.reader.skip_bytes(4); // skip scaler type
         let n_tables = self.reader.read_u16()?;
@@ -97,9 +98,9 @@ impl FontData {
         let mut table_data: HashMap<String, u64> = HashMap::with_capacity(n_tables as usize);
         for _ in 0..n_tables {
             let tag = self.reader.read_tag()?;
-            let _checksum = self.reader.read_u32()?;
+            self.reader.skip_bytes(4); // let _checksum = self.reader.read_u32()?; 
             let offset = self.reader.read_u32()?;
-            let _length = self.reader.read_u32()?;
+            self.reader.skip_bytes(4); // let _length = self.reader.read_u32()?;
             table_data.insert(tag, offset as u64);
         }
 
