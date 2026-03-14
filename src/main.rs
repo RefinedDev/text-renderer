@@ -8,7 +8,7 @@ use font_reader::FontReader;
 use font_table_parser::{FontData, Glyph};
 
 use bevy::{
-    color::palettes::css::{GREEN, RED, WHITE},
+    color::palettes::css::{BLUE, GREEN, RED, WHITE},
     input::mouse::AccumulatedMouseScroll,
     prelude::*,
 };
@@ -22,12 +22,16 @@ struct GlyphUnicode(HashMap<u32, usize>);
 #[derive(Resource)]
 struct GlyphSpaces(Vec<u16>);
 
+#[derive(Resource)]
+struct Debug(bool); // RED MEANS ONCURVE; GREEN MEANS OFFCURVE; BLUE MEANS IMPLIED POINT
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_window, spawn).chain())
-        .add_systems(Update, (render_text, zoom_cam, go_to_cursor).chain())
+        .add_systems(Update, (render_text, zoom_cam, go_to_cursor, toggle_debug).chain())
         .insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(Debug(false))
         .run();
 
     Ok(())
@@ -50,7 +54,7 @@ fn draw_bezier(a: Vec2, b: Vec2, c: Vec2, gizmos: &mut Gizmos) {
     }
 }
 
-fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: Res<GlyphUnicode>, glyph_spaces: Res<GlyphSpaces>) {
+fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: Res<GlyphUnicode>, glyph_spaces: Res<GlyphSpaces>, debugging: Res<Debug>) {
     let mut padding = Vec2::new(0.0, 0.0);
 
     let mut i = 1;
@@ -97,6 +101,12 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
                     contour_with_implied_points.push(a.0.midpoint(b.0));   
                 }
                 
+                if debugging.0 {
+                    gizmos.circle_2d(a.0+padding, 0.5, if a.1 { RED } else { GREEN });
+                    gizmos.circle_2d(b.0+padding, 0.5, if b.1 { RED } else { GREEN });
+                    gizmos.circle_2d(a.0.midpoint(b.0)+padding, 0.5, BLUE);
+                }
+
                 i += 1;
             }
 
@@ -109,9 +119,6 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
                 let b = contour_with_implied_points[(i+1)%contour_with_implied_points.len()];
                 let c = contour_with_implied_points[(i+2)%contour_with_implied_points.len()];
                 draw_bezier(a+padding, b+padding, c+padding, &mut gizmos);
-                gizmos.circle_2d(a+padding, 0.5, RED);
-                gizmos.circle_2d(b+padding, 0.5, GREEN);
-                gizmos.circle_2d(c+padding, 0.5, RED);
                 i+=2;
             }
         }
@@ -175,6 +182,15 @@ fn go_to_cursor(
         *looking_at = Vec3::new(wrt_world.x, wrt_world.y, camera.0.translation.z);
     }
 }
+
+fn toggle_debug(
+    mut debug: ResMut<Debug>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        debug.0 = !debug.0;
+    }
+} 
 
 fn setup_window(mut window: Single<&mut Window>) {
     window.title = String::from("Text Rendering");
