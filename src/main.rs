@@ -54,7 +54,7 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
     let mut padding = Vec2::new(0.0, 0.0);
 
     let mut i = 1;
-    for char in "The quick brown fox jumps over the lazy dog".chars().into_iter() {
+    for char in "The quick brown fox jumps over the lazy dog THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 1234567890".chars().into_iter() {
         if char == ' ' {
             if padding.x != 0.0 {
                 padding.x += 30.0;

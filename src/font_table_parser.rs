@@ -15,34 +15,34 @@ fn get_coordinates(
     window_size: Vec2,
     font_size: f32,
 ) -> Result<Vec<(Vec2, bool)>, Box<dyn std::error::Error>> {
-    let mut short_vector_bit = 1;
-    let mut sign_or_skip_bit = 4;
     let mut coordinates: Vec<(Vec2, bool)> = vec![(Vec2::ZERO, false); flags.len()];
 
     // FOR X
+    let mut short_vector_bit = 1;
+    let mut sign_or_skip_bit = 4;
+
     for i in 0..coordinates.capacity() {
-        coordinates[i].0.x = coordinates[i16::max(0, (i as i16) - 1) as usize].0.x;
+        coordinates[i].0.x = coordinates[i16::max(0, (i as i16) - 1) as usize].0.x; // all points are with respect to previous one and we need with respect to origin (0,0)
         let flag = flags[i];
         let on_curve = bit_is_set(flag, 0);
         coordinates[i].1 = on_curve;
 
         if bit_is_set(flag, short_vector_bit) {
-            let coordinate = reader.read_byte()? as f32;
             let sign: f32 = if bit_is_set(flag, sign_or_skip_bit) {
                 1.0
             } else {
                 -1.0
             };
-            coordinates[i].0.x += (coordinate * sign)*font_size;
+            coordinates[i].0.x += (reader.read_byte()? as f32 * sign)*font_size;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
             coordinates[i].0.x += (reader.read_i16()? as f32)*font_size;
         }
     }
 
+    // FOR Y
     short_vector_bit = 2;
     sign_or_skip_bit = 5;
 
-    // FOR Y
     for i in 0..coordinates.capacity() {
         coordinates[i].0.y = coordinates[i16::max(0, (i as i16) - 1) as usize].0.y;
         let flag = flags[i];
@@ -50,13 +50,12 @@ fn get_coordinates(
         coordinates[i].1 = on_curve;
 
         if bit_is_set(flag, short_vector_bit) {
-            let coordinate = reader.read_byte()? as f32;
             let sign: f32 = if bit_is_set(flag, sign_or_skip_bit) {
                 1.0
             } else {
                 -1.0
             };
-            coordinates[i].0.y += (coordinate * sign)*font_size;
+            coordinates[i].0.y += (reader.read_byte()? as f32 * sign)*font_size;
         } else if !bit_is_set(flag, sign_or_skip_bit) {
             coordinates[i].0.y += (reader.read_i16()? as f32)*font_size;
         }
