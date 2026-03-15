@@ -25,13 +25,17 @@ struct GlyphSpaces(Vec<u16>);
 #[derive(Resource)]
 struct Debug(bool); // RED MEANS ONCURVE; GREEN MEANS OFFCURVE; BLUE MEANS IMPLIED POINT
 
+#[derive(Resource)]
+struct ScreenText(String, bool);
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, (setup_window, spawn).chain())
-        .add_systems(Update, (render_text, zoom_cam, go_to_cursor, toggle_debug).chain())
+        .add_systems(Update, (render_text, zoom_cam, go_to_cursor, input_stuff).chain())
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Debug(false))
+        .insert_resource(ScreenText(String::from("Àáâäãå āăą çćč ďđ èéêë ēėę ìíîï īį ñń òóôöõ ø ō ő ùúûü ū ů ýÿ žźż."), false))
         .run();
 
     Ok(())
@@ -54,85 +58,104 @@ fn draw_bezier(a: Vec2, b: Vec2, c: Vec2, gizmos: &mut Gizmos) {
     }
 }
 
-fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: Res<GlyphUnicode>, glyph_spaces: Res<GlyphSpaces>, debugging: Res<Debug>) {
+fn render_text(
+    mut gizmos: Gizmos,
+    window: Single<&Window>,
+    glyph_data: Res<GlyphData>,
+    glyph_unicodes: Res<GlyphUnicode>,
+    glyph_spaces: Res<GlyphSpaces>,
+    debugging: Res<Debug>,
+    screen_text: Res<ScreenText>
+) {
     let mut padding = Vec2::new(0.0, 0.0);
 
-    let mut i = 1;
-    let _diacretic = "Où, déjà, le garçon très érudit préfère mâcher un yaourt à Noël, là-bas, sous l'école naïve Àáâäãå āăą çćč ďđ èéêë ēėę ìíîï īį ñń òóôöõ ø ō ő ùúûü ū ů ýÿ žźż.";
-    let normal = "The quick brown fox jumps over the lazy dog; THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
-    for char in normal.chars().into_iter() {
-        if char == ' ' {
-            if padding.x != 0.0 {
-                padding.x += 30.0;
-            }
-            continue;
+    for word in screen_text.0.split_ascii_whitespace().into_iter() {
+        let mut total_width_needed: f32 = 0.0;
+
+        for char in word.chars().into_iter() {
+            let unicode = char as u32;
+            let glyph_index = glyph_unicodes.0[&unicode];
+            let glyph_advanced_width = &glyph_spaces.0[glyph_index];
+            let font_size = &glyph_data.0[glyph_index].font_size;
+            total_width_needed += *glyph_advanced_width as f32 * font_size;
         }
-        let unicode = char as u32;
-        let glyph_index = glyph_unicodes.0[&unicode];
-        let glyph_coords = &glyph_data.0[glyph_index].coordinates;
-        let contour_end_points = &glyph_data.0[glyph_index].contour_end_pts;
-        let glyph_advanced_width = &glyph_spaces.0[glyph_index];
-        let font_size = &glyph_data.0[glyph_index].font_size;
 
-        let mut contour_start = 0;
-        for contour_end in contour_end_points.iter() {
-            /*
-                first we loop over the points in the contour and if two consecutive points are oncurve or offcurve, we insert 
-                an implied offcurve or oncurve point which will help us control the bezier curve
-             */
-            let old_contour = &glyph_coords[contour_start..(*contour_end as usize + 1)];
-            let oc_size = old_contour.len();
-
-            let mut first_oncurve_offset = 0; // sometimes the first point isnt on_curve
-            while first_oncurve_offset < oc_size { // we need to find the first on_curve point
-                if old_contour[first_oncurve_offset].1 { // break if that point is on curve
-                    break;
-                }
-                first_oncurve_offset += 1;
-            }
-
-            let mut contour_with_implied_points: Vec<Vec2> = Vec::with_capacity(oc_size);
-
-            let mut i = 0;
-            while i < oc_size {
-                let a = old_contour[(i+first_oncurve_offset)%oc_size];
-                let b = old_contour[(i+first_oncurve_offset+1)%oc_size];
-
-                contour_with_implied_points.push(a.0);
-                if a.1 == b.1 { // both points either on or off curve, then we insert a midpoint as a control point for bezier
-                    contour_with_implied_points.push(a.0.midpoint(b.0));   
-                    if debugging.0{
-                        gizmos.circle_2d(a.0.midpoint(b.0)+padding, 0.5, BLUE);
-                    }
-                }
-                
-                if debugging.0 {
-                    gizmos.circle_2d(a.0+padding, 0.5, if a.1 { RED } else { GREEN });
-                    gizmos.circle_2d(b.0+padding, 0.5, if b.1 { RED } else { GREEN });
-                }
-
-                i += 1;
-            }
-
-            contour_start = *contour_end as usize + 1;
-
-            // render the curve  
-            let mut i = 0;
-            while i < contour_with_implied_points.len() {
-                let a = contour_with_implied_points[i];
-                let b = contour_with_implied_points[(i+1)%contour_with_implied_points.len()];
-                let c = contour_with_implied_points[(i+2)%contour_with_implied_points.len()];
-                draw_bezier(a+padding, b+padding, c+padding, &mut gizmos);
-                i+=2;
-            }
-        }
-        
-        padding.x += *glyph_advanced_width as f32*font_size;
-        if i % 21 == 0 {
+        if padding.x + total_width_needed > window.size().x * 0.9 {
             padding.x = 0.0;
             padding.y -= 100.0;
         }
-        i+=1;
+
+        for char in word.chars().into_iter() {
+            let unicode = char as u32;
+            let glyph_index = glyph_unicodes.0[&unicode];
+            let glyph_coords = &glyph_data.0[glyph_index].coordinates;
+            let contour_end_points = &glyph_data.0[glyph_index].contour_end_pts;
+            let glyph_advanced_width = &glyph_spaces.0[glyph_index];
+            let font_size = &glyph_data.0[glyph_index].font_size;
+
+            let mut contour_start = 0;
+            for contour_end in contour_end_points.iter() {
+                /*
+                   first we loop over the points in the contour and if two consecutive points are oncurve or offcurve, we insert
+                   an implied offcurve or oncurve point which will help us control the bezier curve
+                */
+                let old_contour = &glyph_coords[contour_start..(*contour_end as usize + 1)];
+                let oc_size = old_contour.len();
+
+                let mut first_oncurve_offset = 0; // sometimes the first point isnt on_curve
+                while first_oncurve_offset < oc_size {
+                    // we need to find the first on_curve point
+                    if old_contour[first_oncurve_offset].1 {
+                        // break if that point is on curve
+                        break;
+                    }
+                    first_oncurve_offset += 1;
+                }
+
+                let mut contour_with_implied_points: Vec<Vec2> = Vec::with_capacity(oc_size);
+
+                let mut i = 0;
+                while i < oc_size {
+                    let a = old_contour[(i + first_oncurve_offset) % oc_size];
+                    let b = old_contour[(i + first_oncurve_offset + 1) % oc_size];
+
+                    contour_with_implied_points.push(a.0);
+                    if a.1 == b.1 {
+                        // both points either on or off curve, then we insert a midpoint as a control point for bezier
+                        contour_with_implied_points.push(a.0.midpoint(b.0));
+                        if debugging.0 {
+                            gizmos.circle_2d(a.0.midpoint(b.0) + padding, 0.5, BLUE);
+                        }
+                    }
+
+                    if debugging.0 {
+                        gizmos.circle_2d(a.0 + padding, 0.5, if a.1 { RED } else { GREEN });
+                        gizmos.circle_2d(b.0 + padding, 0.5, if b.1 { RED } else { GREEN });
+                    }
+
+                    i += 1;
+                }
+
+                contour_start = *contour_end as usize + 1;
+
+                // render the curve
+                let mut i = 0;
+                while i < contour_with_implied_points.len() {
+                    let a = contour_with_implied_points[i];
+                    let b = contour_with_implied_points[(i + 1) % contour_with_implied_points.len()];
+                    let c =contour_with_implied_points[(i + 2) % contour_with_implied_points.len()];
+                    draw_bezier(a + padding, b + padding, c + padding, &mut gizmos);
+                    i += 2;
+                }
+            }
+
+            padding.x += *glyph_advanced_width as f32 * font_size;
+            if padding.x > window.size().x*0.9 {
+                padding.x = 0.0;
+                padding.y -= 100.0;
+            }
+        }
+        padding.x += 30.0; // whitespace
     }
 }
 
@@ -162,7 +185,7 @@ fn zoom_cam(
 ) {
     let delta_zoom = -mouse_wheel.delta.y * 0.2;
     let multiplicative_zoom = 1. + delta_zoom;
-    camera.scale = (camera.scale * multiplicative_zoom).clamp(f32::MIN, 1.0);
+    camera.scale = (camera.scale * multiplicative_zoom).clamp(f32::MIN, 2.0);
 }
 
 fn go_to_cursor(
@@ -187,14 +210,35 @@ fn go_to_cursor(
     }
 }
 
-fn toggle_debug(
-    mut debug: ResMut<Debug>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-) {
-    if keyboard_input.just_pressed(KeyCode::Space) {
-        debug.0 = !debug.0;
+fn keycode_to_string(key: &KeyCode) -> String {
+    let debug = format!("{:?}", key);
+    if let Some(s) = debug.strip_prefix("Key") {
+        s.to_string().to_lowercase()
+    } else if let Some(s) = debug.strip_prefix("Digit") {
+        s.to_string().to_lowercase()
+    } else {
+        String::from("skip")   
     }
-} 
+}
+
+fn input_stuff(mut debug: ResMut<Debug>, mut screentext: ResMut<ScreenText>, keyboard_input: Res<ButtonInput<KeyCode>>) {
+    if keyboard_input.just_pressed(KeyCode::CapsLock) {
+        debug.0 = !debug.0;
+    } else if keyboard_input.just_pressed(KeyCode::Tab) {
+        screentext.1 = !screentext.1;
+    } else if screentext.1 && keyboard_input.just_pressed(KeyCode::Backspace) && !screentext.0.is_empty() {
+        screentext.0.pop();
+    } else if screentext.1 && keyboard_input.just_pressed(KeyCode::Space) {
+        screentext.0.push(' ');
+    } else if screentext.1 {
+        let just_pressed = keyboard_input.get_just_pressed();
+        for key in just_pressed.into_iter() {
+            let s = keycode_to_string(key);
+            if s == "skip" { continue }
+            screentext.0.push_str(&s);
+        }
+    }
+}
 
 fn setup_window(mut window: Single<&mut Window>) {
     window.title = String::from("Text Rendering");
