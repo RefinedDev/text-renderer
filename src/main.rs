@@ -58,7 +58,9 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
     let mut padding = Vec2::new(0.0, 0.0);
 
     let mut i = 1;
-    for char in "The quick brown fox jumps over the lazy dog THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 1234567890".chars().into_iter() {
+    let _diacretic = "Où, déjà, le garçon très érudit préfère mâcher un yaourt à Noël, là-bas, sous l'école naïve Àáâäãå āăą çćč ďđ èéêë ēėę ìíîï īį ñń òóôöõ ø ō ő ùúûü ū ů ýÿ žźż.";
+    let normal = "The quick brown fox jumps over the lazy dog; THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
+    for char in normal.chars().into_iter() {
         if char == ' ' {
             if padding.x != 0.0 {
                 padding.x += 30.0;
@@ -99,12 +101,14 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
                 contour_with_implied_points.push(a.0);
                 if a.1 == b.1 { // both points either on or off curve, then we insert a midpoint as a control point for bezier
                     contour_with_implied_points.push(a.0.midpoint(b.0));   
+                    if debugging.0{
+                        gizmos.circle_2d(a.0.midpoint(b.0)+padding, 0.5, BLUE);
+                    }
                 }
                 
                 if debugging.0 {
                     gizmos.circle_2d(a.0+padding, 0.5, if a.1 { RED } else { GREEN });
                     gizmos.circle_2d(b.0+padding, 0.5, if b.1 { RED } else { GREEN });
-                    gizmos.circle_2d(a.0.midpoint(b.0)+padding, 0.5, BLUE);
                 }
 
                 i += 1;
@@ -135,7 +139,7 @@ fn render_text(mut gizmos: Gizmos, glyph_data: Res<GlyphData>, glyph_unicodes: R
 fn spawn(window: Single<&Window>, mut commands: Commands) {
     commands.spawn(Camera2d);
 
-    let reader = FontReader::new("boldfont.ttf").unwrap();
+    let reader = FontReader::new("using.ttf").unwrap();
     let mut font_data_parser = FontData {
         reader,
         ..default()

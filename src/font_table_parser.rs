@@ -70,7 +70,7 @@ fn get_coordinates(
     Ok(coordinates)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Glyph {
     pub coordinates: Vec<(Vec2, bool)>, // bool is for on_curve parameter
     pub contour_end_pts: Vec<u16>,
@@ -141,47 +141,103 @@ impl FontData {
         let font_size = 84.0/self.reader.read_u16()? as f32;
         self.reader.go_to(prev_location);
 
-        for glyf_location in self.glyph_locations.iter() {
+        let mut compound_glyph_hashes: Vec<HashMap<[usize; 2], [Vec2; 2]>> = Vec::with_capacity(20);
+        for (loop_index, glyf_location) in self.glyph_locations.iter().enumerate() {
             self.reader.go_to(*glyf_location);
 
             let n_contours = self.reader.read_i16()? as usize;
-            if n_contours == usize::MAX {
-                self.glyphs.push(self.glyphs[0].clone());
-                continue;  // compound glyph
-            }
+            if n_contours == usize::MAX { // COMPOUND GLYPH
+                self.glyphs.push(Glyph::default());
+                
+                /*
+                since there is arbitrary ordering of compound and simple glyphs ill just store this data 
+                somewhere and stich them up after all simple glyphs have been loaded.
+                */
+                
+                self.reader.skip_bytes(8); // skip the FWord bounding boxes (each one is 2 bytes)
 
-            let mut contour_end_pts = Vec::with_capacity(n_contours);
-            self.reader.skip_bytes(8); // skip the FWord bounding boxes (each one is 2 bytes)
+                let mut glyf_data: HashMap<[usize; 2], [Vec2; 2]> = HashMap::with_capacity(2); // ((glyf_index, loop_index), (offset, scales))
+                loop { 
+                    let flags = self.reader.read_u16()?;
+                    let glyph_index = self.reader.read_u16()? as usize;
 
-            for _ in 0..contour_end_pts.capacity() {
-                contour_end_pts.push(self.reader.read_u16()?);
-            }
+                    // if (flags >> 1) & 1 == 1 {panic!("arguments are points not xyvalues")}
+                    let x_offset = if (flags >> 0) & 1 == 1 {self.reader.read_i16()? as f32} else {self.reader.read_byte()? as f32};
+                    let y_offset = if (flags >> 0) & 1 == 1 {self.reader.read_i16()? as f32} else {self.reader.read_byte()? as f32};
+                    let mut x_scale = 1.0;
+                    let mut y_scale = 1.0;
 
-            let instructions_length = self.reader.read_u16()?;
-            self.reader.skip_bytes(instructions_length as u64); // skip instructions 
+                    if (flags >> 3) & 1 == 1 {
+                        x_scale = self.reader.read_i16()? as f32;
+                        y_scale = x_scale
+                    } else if (flags >> 6) & 1 == 1 {
+                        x_scale = self.reader.read_i16()? as f32;
+                        y_scale = self.reader.read_i16()? as f32;
+                    } else if (flags >> 7) & 1 == 1 {
+                        panic!("2x2 matrix!")
+                    }
 
-            let flag_capacity: usize = *contour_end_pts.last().unwrap_or(&0) as usize + 1;
-            let mut flags: Vec<u8> = Vec::with_capacity(flag_capacity);
+                    glyf_data.insert([glyph_index, loop_index], [Vec2::new(x_offset, y_offset), Vec2::new(x_scale, y_scale)]);
 
-            let mut i = 0;
-            while i < flag_capacity {
-                i += 1;
-                let flag = self.reader.read_byte()?;
-                flags.push(flag);
-
-                if bit_is_set(flag, 3) {
-                    for _ in 0..self.reader.read_byte()? {
-                        flags.push(flag);
-                        i += 1;
+                    if (flags >> 5) & 1 == 0 {
+                        break;
                     }
                 }
-                
-            }
+                compound_glyph_hashes.push(glyf_data);
+            } else { // SIMPLE GLYPH
+                let mut contour_end_pts = Vec::with_capacity(n_contours);
+                self.reader.skip_bytes(8); // skip the FWord bounding boxes (each one is 2 bytes)
 
-            let coordinates = get_coordinates(&mut self.reader, &flags, window_size, font_size)?;
-            self.glyphs.push(Glyph { coordinates, contour_end_pts, font_size });
+                for _ in 0..n_contours {
+                    contour_end_pts.push(self.reader.read_u16()?);
+                }
+
+                let instructions_length = self.reader.read_u16()?;
+                self.reader.skip_bytes(instructions_length as u64); // skip instructions 
+
+                let flag_capacity: usize = *contour_end_pts.last().unwrap_or(&0) as usize + 1;
+                let mut flags: Vec<u8> = Vec::with_capacity(flag_capacity);
+
+                let mut i = 0;
+                while i < flag_capacity {
+                    i += 1;
+                    let flag = self.reader.read_byte()?;
+                    flags.push(flag);
+
+                    if bit_is_set(flag, 3) {
+                        for _ in 0..self.reader.read_byte()? {
+                            flags.push(flag);
+                            i += 1;
+                        }
+                    }
+                    
+                }
+
+                let coordinates = get_coordinates(&mut self.reader, &flags, window_size, font_size)?;
+                self.glyphs.push(Glyph { coordinates, contour_end_pts, font_size });
+            }
         }
 
+        // ALL SIMPLE GLYPHS LOADED SO WE STITCH UP COMPOUND GLYPHS
+        for cg in compound_glyph_hashes.into_iter() {
+            let mut new_coordinates: Vec<(Vec2, bool)> = Vec::with_capacity(105);
+            let mut new_contour_end_pts: Vec<u16> = Vec::with_capacity(5); 
+            let mut insert_at: usize = 0;
+            let mut last_end_point: u16 = 0;
+            for g in cg {
+                insert_at = g.0[1];
+
+                let glyph = &self.glyphs[g.0[0]];
+                for c in glyph.coordinates.iter() {
+                    new_coordinates.push((Vec2::new(c.0.x+(g.1[0].x*font_size), c.0.y+(g.1[0].y*font_size)), c.1));
+                }
+                for e in glyph.contour_end_pts.iter() {
+                    new_contour_end_pts.push(e+last_end_point);
+                }
+                last_end_point += *glyph.contour_end_pts.last().unwrap_or(&0) + 1;
+            }
+            self.glyphs[insert_at] = Glyph { coordinates: new_coordinates, contour_end_pts: new_contour_end_pts, font_size };
+        }
         Ok(())
     }
 
