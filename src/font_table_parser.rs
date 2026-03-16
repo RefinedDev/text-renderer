@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::font_reader::FontReader;
 
+const FONT_SIZE_CONSTANT: f32 = 100.0;
 // https://developer.apple.com/fonts/TrueType-Reference-Manual/
 // https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6glyf.html
 fn bit_is_set(flag: u8, bit: u8) -> bool {
@@ -75,6 +76,7 @@ pub struct Glyph {
     pub coordinates: Vec<(Vec2, bool)>, // bool is for on_curve parameter
     pub contour_end_pts: Vec<u16>,
     pub font_size: f32,
+    pub contour_coordinates: Vec<Vec<(Vec2, u8)>>, // these are setup in main.rs (setup_implied_points)
 }
 
 #[derive(Default)]
@@ -84,7 +86,7 @@ pub struct FontData {
     pub glyph_locations: Vec<u64>,
     pub glyphs: Vec<Glyph>,
     pub unicodes_to_index: HashMap<u32, usize>,
-    pub glyph_spaces: Vec<u16>,
+    pub glyph_spaces: Vec<f32>,
 }
 
 impl FontData {
@@ -138,7 +140,7 @@ impl FontData {
         // GET FONT SIZE BEFORE THAT
         let prev_location = self.reader.get_location();
         self.reader.go_to(self.font_table["head"] + 18);
-        let font_size = 84.0/self.reader.read_u16()? as f32;
+        let font_size = FONT_SIZE_CONSTANT/self.reader.read_u16()? as f32;
         self.reader.go_to(prev_location);
 
         let mut compound_glyph_hashes: Vec<HashMap<[usize; 2], [Vec2; 2]>> = Vec::with_capacity(20);
@@ -214,7 +216,7 @@ impl FontData {
                 }
 
                 let coordinates = get_coordinates(&mut self.reader, &flags, window_size, font_size)?;
-                self.glyphs.push(Glyph { coordinates, contour_end_pts, font_size });
+                self.glyphs.push(Glyph { coordinates, contour_end_pts, font_size, contour_coordinates: Vec::with_capacity(n_contours) });
             }
         }
 
@@ -236,7 +238,7 @@ impl FontData {
                 }
                 last_end_point += *glyph.contour_end_pts.last().unwrap_or(&0) + 1;
             }
-            self.glyphs[insert_at] = Glyph { coordinates: new_coordinates, contour_end_pts: new_contour_end_pts, font_size };
+            self.glyphs[insert_at] = Glyph { coordinates: new_coordinates, contour_end_pts: new_contour_end_pts, font_size, contour_coordinates: Vec::with_capacity(5) };
         }
         Ok(())
     }
@@ -357,10 +359,10 @@ impl FontData {
         let num_long_hor_metrics = self.reader.read_u16()?;
 
         self.reader.go_to(self.font_table["hmtx"]);
-        let mut advance_widths = Vec::with_capacity(self.glyphs.len());
+        let mut advance_widths: Vec<f32> = Vec::with_capacity(self.glyphs.len());
 
         for _ in 0..num_long_hor_metrics {
-            advance_widths.push(self.reader.read_u16()?);
+            advance_widths.push(self.reader.read_u16()? as f32);
             self.reader.skip_bytes(2);
         }
 
