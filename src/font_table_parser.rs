@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::font_reader::FontReader;
 
-const FONT_SIZE_CONSTANT: f32 = 100.0;
+const FONT_SIZE_CONSTANT: f32 = 85.0;
 // https://developer.apple.com/fonts/TrueType-Reference-Manual/
 // https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6glyf.html
 fn bit_is_set(flag: u8, bit: u8) -> bool {

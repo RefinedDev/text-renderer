@@ -124,8 +124,15 @@ fn render_text(
     glyph_unicodes: Res<GlyphUnicode>,
     glyph_spaces: Res<GlyphSpaces>,
     debugging: Res<Debug>,
-    screen_text: Res<ScreenText>
+    screen_text: Res<ScreenText>,
+
+    camera: Single<(&GlobalTransform, &Camera), With<Camera>>,
 ) {
+    let min = Vec2::new(-50.0,-50.0);
+    let max = Vec2::new(window.width()*2.0, window.height()*2.0);
+    let world_min = camera.1.viewport_to_world_2d(camera.0, min).unwrap();
+    let world_max = camera.1.viewport_to_world_2d(camera.0, max).unwrap();
+   
     let mut padding = Vec2::new(0.0, 0.0);
     let w_size = window.size().x;
     let mut font_size: &f32 = &0.0;
@@ -142,7 +149,7 @@ fn render_text(
 
         if padding.x + total_width_needed > w_size * 0.9 {
             padding.x = 0.0;
-            padding.y -= font_size*2000.0;
+            padding.y -= font_size*2500.0;
         }
 
         for char in word.chars().into_iter() {
@@ -158,20 +165,26 @@ fn render_text(
                     let a = contour_with_implied_points[i];
                     let b = contour_with_implied_points[(i + 1) % length];
                     let c =contour_with_implied_points[(i + 2) % length];
-                    draw_curve(a.0 + padding, b.0 + padding, c.0 + padding, &mut gizmos);
-                    if debugging.0 { // this gets really laggy if many letters i could just check if the glyph is in the viewport and then render these but who cares!
-                        gizmos.circle_2d(a.0 + padding, 0.5, if a.1==0 { RED } else if a.1==1 { GREEN } else {BLUE});
-                        gizmos.circle_2d(b.0 + padding, 0.5, if b.1==0 { RED } else if b.1==1 { GREEN } else {BLUE});
-                        gizmos.circle_2d(c.0 + padding, 0.5, if c.1==0 { RED } else if c.1==1 { GREEN } else {BLUE});
+                    let (p1,p2,p3) = (a.0+padding, b.0+padding,c.0+padding);
+                
+                    if p1.x > world_max.x || p1.y < world_max.y || p1.x < world_min.x || p1.y > world_min.y {
+                        break;
+                    } else {
+                        draw_curve(p1, p2, p3, &mut gizmos);
+                        if debugging.0 {
+                            gizmos.circle_2d(p1, 0.5, if a.1==0 { RED } else if a.1==1 { GREEN } else {BLUE});
+                            gizmos.circle_2d(p2, 0.5, if b.1==0 { RED } else if b.1==1 { GREEN } else {BLUE});
+                            gizmos.circle_2d(p3, 0.5, if c.1==0 { RED } else if c.1==1 { GREEN } else {BLUE});
+                        }
                     }
-                    i += 2;
+                     i += 2;
                 }
            }
 
             padding.x += *glyph_advanced_width * font_size;
             if padding.x > w_size*0.9 {
                 padding.x = 0.0;
-                padding.y -= font_size*2000.0;
+                padding.y -= font_size*2500.0;
             }
         }
         padding.x += 30.0; // whitespace
@@ -205,7 +218,7 @@ fn zoom_cam(
 ) {
     let delta_zoom = -mouse_wheel.delta.y * 0.2;
     let multiplicative_zoom = 1. + delta_zoom;
-    camera.scale = (camera.scale * multiplicative_zoom).clamp(f32::MIN, 2.0);
+    camera.scale = (camera.scale * multiplicative_zoom).clamp(0.15, 2.0);
 }
 
 fn go_to_cursor(
@@ -250,6 +263,8 @@ fn input_stuff(mut debug: ResMut<Debug>, mut screentext: ResMut<ScreenText>, key
         screentext.0.pop();
     } else if screentext.1 && keyboard_input.just_pressed(KeyCode::Space) {
         screentext.0.push(' ');
+    } else if screentext.1 && keyboard_input.pressed(KeyCode::ShiftRight) { // funny
+        screentext.0.push('E');
     } else if screentext.1 {
         let just_pressed = keyboard_input.get_just_pressed();
         let holding_shift = keyboard_input.pressed(KeyCode::ShiftLeft);
