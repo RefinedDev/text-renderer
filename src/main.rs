@@ -24,6 +24,9 @@ struct GlyphUnicode(HashMap<u32, usize>);
 struct GlyphSpaces(Vec<f32>);
 
 #[derive(Resource)]
+struct FontScaleANDLineHeight(f32, f32);
+
+#[derive(Resource)]
 struct Debug(bool); // RED MEANS ONCURVE; GREEN MEANS OFFCURVE; BLUE MEANS IMPLIED POINT
 
 #[derive(Resource)]
@@ -123,33 +126,36 @@ fn render_text(
     glyph_data: Res<GlyphData>,
     glyph_unicodes: Res<GlyphUnicode>,
     glyph_spaces: Res<GlyphSpaces>,
+    fontscale_and_lineheight: Res<FontScaleANDLineHeight>,
     debugging: Res<Debug>,
     screen_text: Res<ScreenText>,
 
     camera: Single<(&GlobalTransform, &Camera), With<Camera>>,
 ) {
-    let min = Vec2::new(-50.0,-50.0);
-    let max = Vec2::new(window.width()*2.0, window.height()*2.0);
+    let min = Vec2::new(-125.0,-125.0);
+    let max = Vec2::new(window.width()*1.4, window.height()*1.4);
     let world_min = camera.1.viewport_to_world_2d(camera.0, min).unwrap();
     let world_max = camera.1.viewport_to_world_2d(camera.0, max).unwrap();
-   
+    let (x_min, y_min, x_max, y_max) = (world_min.x, world_max.y, world_max.x, world_min.y); // weird as fuck i know
+
     let mut padding = Vec2::new(0.0, 0.0);
     let w_size = window.size().x;
-    let mut font_size: &f32 = &0.0;
+
+    let font_scale = fontscale_and_lineheight.0;
+    let line_height = fontscale_and_lineheight.1;
     for word in screen_text.0.split_ascii_whitespace().into_iter() {
         let mut total_width_needed: f32 = 0.0;
-
+        
         for char in word.chars().into_iter() {
             let unicode = char as u32;
             let glyph_index = glyph_unicodes.0[&unicode];
             let glyph_advanced_width = &glyph_spaces.0[glyph_index];
-            font_size = &glyph_data.0[glyph_index].font_size;
-            total_width_needed += *glyph_advanced_width as f32 * font_size;
+            total_width_needed += *glyph_advanced_width as f32 * font_scale;
         }
 
         if padding.x + total_width_needed > w_size * 0.9 {
             padding.x = 0.0;
-            padding.y -= font_size*2500.0;
+            padding.y += line_height;
         }
 
         for char in word.chars().into_iter() {
@@ -157,8 +163,13 @@ fn render_text(
             let glyph_index = glyph_unicodes.0[&unicode];
             let contour_coordinates = &glyph_data.0[glyph_index].contour_coordinates;
             let glyph_advanced_width = &glyph_spaces.0[glyph_index];
-       
+            let bounding_box = &glyph_data.0[glyph_index].bounding_box;
+            
             for contour_with_implied_points in contour_coordinates {
+                if bounding_box[0]+padding.x < x_min || bounding_box[1]+padding.y < y_min || bounding_box[2]+padding.x > x_max || bounding_box[3]+padding.y > y_max {
+                    break;
+                }
+
                 let mut i = 0;
                 let length = contour_with_implied_points.len();
                 while i < length {
@@ -166,25 +177,22 @@ fn render_text(
                     let b = contour_with_implied_points[(i + 1) % length];
                     let c =contour_with_implied_points[(i + 2) % length];
                     let (p1,p2,p3) = (a.0+padding, b.0+padding,c.0+padding);
-                
-                    if p1.x > world_max.x || p1.y < world_max.y || p1.x < world_min.x || p1.y > world_min.y {
-                        break;
-                    } else {
-                        draw_curve(p1, p2, p3, &mut gizmos);
-                        if debugging.0 {
-                            gizmos.circle_2d(p1, 0.5, if a.1==0 { RED } else if a.1==1 { GREEN } else {BLUE});
-                            gizmos.circle_2d(p2, 0.5, if b.1==0 { RED } else if b.1==1 { GREEN } else {BLUE});
-                            gizmos.circle_2d(p3, 0.5, if c.1==0 { RED } else if c.1==1 { GREEN } else {BLUE});
-                        }
+                 
+                    draw_curve(p1, p2, p3, &mut gizmos);
+                    if debugging.0 {
+                        gizmos.circle_2d(p1, 0.5, if a.1==0 { RED } else if a.1==1 { GREEN } else {BLUE});
+                        gizmos.circle_2d(p2, 0.5, if b.1==0 { RED } else if b.1==1 { GREEN } else {BLUE});
+                        gizmos.circle_2d(p3, 0.5, if c.1==0 { RED } else if c.1==1 { GREEN } else {BLUE});
                     }
-                     i += 2;
+                    
+                    i += 2;
                 }
            }
 
-            padding.x += *glyph_advanced_width * font_size;
+            padding.x += *glyph_advanced_width * font_scale;
             if padding.x > w_size*0.9 {
                 padding.x = 0.0;
-                padding.y -= font_size*2500.0;
+                padding.y += line_height;
             }
         }
         padding.x += 30.0; // whitespace
@@ -207,6 +215,7 @@ fn spawn(window: Single<&Window>, mut commands: Commands) {
     font_data_parser.get_glyph_spacings().unwrap();
     setup_implied_points(&mut font_data_parser.glyphs);
     
+    commands.insert_resource(FontScaleANDLineHeight(font_data_parser.font_scale, font_data_parser.line_height));
     commands.insert_resource(GlyphData(font_data_parser.glyphs));
     commands.insert_resource(GlyphUnicode(font_data_parser.unicodes_to_index));
     commands.insert_resource(GlyphSpaces(font_data_parser.glyph_spaces));
