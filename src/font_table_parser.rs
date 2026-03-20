@@ -159,7 +159,12 @@ impl FontData {
         self.font_scale = FONT_SIZE_CONSTANT/self.reader.read_u16()? as f32;
         self.reader.go_to(prev_location);
 
-        let mut compound_glyph_hashes: Vec<HashMap<[usize; 2], [Vec2; 4]>> = Vec::with_capacity(20);
+        enum CompoundScaleForm {
+            NotMatrix([f32; 2]),
+            Matrix([f32; 4])
+        }         
+        let mut compound_glyph_hashes: Vec<HashMap<[usize; 2], [Vec2; 3]>> = Vec::with_capacity(20); // ((glyf_index, loop_index), (offset, bound_min, bound_max))
+        let mut compound_glyph_scales: Vec<CompoundScaleForm> = Vec::with_capacity(20);
         for (loop_index, glyf_location) in self.glyph_locations.iter().enumerate() {
             self.reader.go_to(*glyf_location);
 
@@ -173,38 +178,47 @@ impl FontData {
                 */
                 
                 let (x_min, y_min, x_max, y_max) = (self.reader.read_i16()? as f32*self.font_scale,self.reader.read_i16()? as f32*self.font_scale,self.reader.read_i16()? as f32*self.font_scale,self.reader.read_i16()? as f32*self.font_scale);
-            
-                let mut glyf_data: HashMap<[usize; 2], [Vec2; 4]> = HashMap::with_capacity(2); // ((glyf_index, loop_index), (offset, scales, bound_min, bound_max))
+                
+                // ((glyf_index, loop_index), (offset, bound_min, bound_max))
+                let mut glyf_data: HashMap<[usize; 2], [Vec2; 3]> = HashMap::with_capacity(2);  // its messy i know but its aight
                 loop { 
-                    let flags = self.reader.read_u16()?;
+                    let flags = self.reader.read_u16()? as u8; //  since i do need the bits above 8 just make it one byte
                     let glyph_index = self.reader.read_u16()? as usize;
 
-                    let arg_are_2_bytes = (flags >> 0) & 1 == 1;
-                    let args_are_xy_values = (flags >> 1) & 1 == 1;
-                    let x_y_scale_same = (flags >> 3) & 1 == 1;
-                    let x_y_scale_not_same = (flags >> 6) & 1 == 1;
-                    let is_2by2 = (flags >> 7) & 1 == 1;
+                    let arg_are_2_bytes = bit_is_set(flags, 0);
+                    let args_are_xy_values = bit_is_set(flags, 1);
+                    let x_y_scale_same = bit_is_set(flags, 3);
+                    let x_y_scale_not_same = bit_is_set(flags, 6);
+                    let is_2by2 = bit_is_set(flags, 7);
 
-                    if !args_are_xy_values {panic!("arguments are points not xyvalues")};
+                    if !args_are_xy_values {todo!("arguments are points not xyvalues")}; // have not really encountered fonts that use fonts yet so ill implement if i find one :3
 
-                    let x_offset = if arg_are_2_bytes {self.reader.read_i16()? as f32} else {self.reader.read_byte()? as f32};
-                    let y_offset = if arg_are_2_bytes {self.reader.read_i16()? as f32} else {self.reader.read_byte()? as f32};
+                    // as i8 because range of u8 is [0,255] where as i8 is [-128, +127] and negative offsets can exist (this shit took too long to figure out 😭).
+                    let x_offset = if arg_are_2_bytes {self.reader.read_i16()? as f32} else {self.reader.read_byte()? as i8 as f32};
+                    let y_offset = if arg_are_2_bytes {self.reader.read_i16()? as f32} else {self.reader.read_byte()? as i8 as f32};
 
-                    let mut x_scale = 1.0;
-                    let mut y_scale = 1.0;
-                    if x_y_scale_same {
-                        x_scale = self.reader.read_i16()? as f32;
-                        y_scale = x_scale
-                    } else if  x_y_scale_not_same {
-                        x_scale = self.reader.read_i16()? as f32;
-                        y_scale = self.reader.read_i16()? as f32;
-                    } else if  is_2by2 {
-                        panic!("2x2 matrix!")
+                    if !is_2by2 {
+                        let mut x_scale = 1.0;
+                        let mut y_scale = 1.0;
+                        if x_y_scale_same {
+                            x_scale = self.reader.read_i16()? as f32 / 16384.0;
+                            y_scale = x_scale;
+                        } else if  x_y_scale_not_same {
+                            x_scale = self.reader.read_i16()? as f32 / 16384.0;
+                            y_scale = self.reader.read_i16()? as f32 / 16384.0;
+                        }
+                        compound_glyph_scales.push(CompoundScaleForm::NotMatrix([x_scale,y_scale]));
+                    } else {
+                        let x_scale = self.reader.read_i16()? as f32 / 16384.0;
+                        let scale01 = self.reader.read_i16()? as f32 / 16384.0;
+                        let scale10 = self.reader.read_i16()? as f32 / 16384.0;
+                        let y_scale = self.reader.read_i16()? as f32 / 16384.0;
+                        compound_glyph_scales.push(CompoundScaleForm::Matrix([x_scale,scale01,scale10,y_scale]));
                     }
 
-                    glyf_data.insert([glyph_index, loop_index], [Vec2::new(x_offset, y_offset), Vec2::new(x_scale, y_scale), Vec2::new(x_min, y_min), Vec2::new(x_max, y_max)]);
+                    glyf_data.insert([glyph_index, loop_index], [Vec2::new(x_offset, y_offset), Vec2::new(x_min, y_min), Vec2::new(x_max, y_max)]);
 
-                    if (flags >> 5) & 1 == 0 {
+                    if !bit_is_set(flags, 5) {
                         break;
                     }
                 }
@@ -250,26 +264,34 @@ impl FontData {
         for compound_glyf in compound_glyph_hashes.into_iter() {
             let mut new_coordinates: Vec<(Vec2, bool)> = Vec::with_capacity(105);
             let mut new_contour_end_pts: Vec<u16> = Vec::with_capacity(5); 
-            let mut insert_at: usize = 0;
+            let mut insert_at: usize = 0; // loop_index
             let mut last_end_point: u16 = 0;
             let mut bounding_box: Option<[f32;4]> = None;
-            for glyf in compound_glyf {
+            for (index,glyf) in compound_glyf.iter().enumerate() {
                 if let None = bounding_box {
-                    insert_at = glyf.0[1];
-                    bounding_box = Some([glyf.1[2].x, glyf.1[2].y, glyf.1[3].x ,glyf.1[3].y]);
+                    insert_at = glyf.0[1]; // loop_index
+                    bounding_box = Some([glyf.1[1].x, glyf.1[1].y, glyf.1[2].x ,glyf.1[2].y]);
                 }
                 
-                let glyph = &self.glyphs[glyf.0[0]];
-                for cord in glyph.coordinates.iter() {
-                    let offset_x = glyf.1[0].x*self.font_scale;
-                    let offset_y = glyf.1[0].y*self.font_scale;
-                    let scale_x = glyf.1[1].x;
-                    let scale_y = glyf.1[1].y;
-                    new_coordinates.push((Vec2::new(cord.0.x*scale_x + offset_x, cord.0.y*scale_y + offset_y), cord.1));
+                let glyph = &self.glyphs[glyf.0[0]]; // glyph_index
+                let offset_x = glyf.1[0].x*self.font_scale;
+                let offset_y = glyf.1[0].y*self.font_scale;
+               
+               let scaleform = &compound_glyph_scales[index];
+                if let CompoundScaleForm::NotMatrix(scale) = scaleform {
+                    let s_x = scale[0];
+                    let s_y = scale[1];  
+                    glyph.coordinates.iter().for_each(|f| new_coordinates.push((Vec2::new(f.0.x*s_x + offset_x, f.0.y*s_y + offset_y), f.1)));
+                } else if let CompoundScaleForm::Matrix(scale) = scaleform {
+                    let a11 = scale[0];
+                    let a12 = scale[1];
+                    let a21 = scale[2];
+                    let a22 = scale[3];
+                    glyph.coordinates.iter().for_each(|f| new_coordinates.push((Vec2::new(f.0.x*a11 + f.0.y*a12 + offset_x, f.0.x*a21 + f.0.y*a22 + offset_y), f.1)));
                 }
-                for e in glyph.contour_end_pts.iter() {
-                    new_contour_end_pts.push(e+last_end_point);
-                }
+                
+                glyph.contour_end_pts.iter().for_each(|f| new_contour_end_pts.push(f + last_end_point));
+                
                 last_end_point += *glyph.contour_end_pts.last().unwrap_or(&0) + 1;
             }
 

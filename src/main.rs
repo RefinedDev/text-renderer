@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(Update, (render_text, zoom_cam, go_to_cursor, input_stuff).chain())
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Debug(false))
-        .insert_resource(ScreenText(String::from("Àáâäãå āăą çćč ďđ èéêë ēėę ìíîï īį ñń òóôöõ ø ō ő ùúûü ū ů ýÿ žźż."), false))
+        .insert_resource(ScreenText(String::from("Àáâäãå āăą çćč ďđ èéêë ēėę ìíîï īį ñń òóôöõ ø ō ő ùúûü ū ů ýÿ žźż. ` !@#$%^&*()[]/><,."), false))
         .run();
 
     Ok(())
@@ -82,10 +82,20 @@ fn setup_implied_points(glyph_data: &mut Vec<Glyph>) {
         let mut contour_start = 0;
         for contour_end in contour_end_points.iter() {
             /*
-                first we loop over the points in the contour and if two consecutive points are oncurve or offcurve, we insert
-                an implied offcurve or oncurve point which will help us control the bezier curve
+            first we loop over the points in the contour and if two consecutive points are oncurve or offcurve, we insert
+            an implied offcurve or oncurve point which will help us control the bezier curve
             */
-            let old_contour = &glyph_coords[contour_start..(*contour_end as usize + 1)];
+
+            /*
+            found this bug with JETBRAINS MONO at the moment
+            BUG: some glyphs like Ŀ ŀ, their dot contour is just a single point, not a set of points so gotta hardcode a dot i guess
+            well thats what i hope so and its not a parsing issue.
+
+            therefore im usize:min(ing) contour_end for now because it leads to index error
+            */
+            let contour_end = usize::min(*contour_end as usize + 1, glyph_coords.len()); 
+            
+            let old_contour = &glyph_coords[contour_start..(contour_end)];
             let oc_size = old_contour.len();
 
             let mut first_oncurve_offset = 0; // sometimes the first point isnt on_curve
@@ -112,7 +122,7 @@ fn setup_implied_points(glyph_data: &mut Vec<Glyph>) {
             }
 
             glyph.contour_coordinates.push(contour_with_implied_points);
-            contour_start = *contour_end as usize + 1;
+            contour_start = contour_end;
         }
         glyph.coordinates = Vec::new();
         glyph.contour_end_pts = Vec::new(); 
