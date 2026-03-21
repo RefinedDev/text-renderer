@@ -75,24 +75,6 @@ pub struct Glyph {
     pub bounding_box: [f32; 4], // x_min, y_min, x_max, y_max
 }
 
-impl Glyph {
-    fn translate_towards_top_left(&mut self, window_size: Vec2) {
-        self.coordinates.iter_mut().for_each(|f| {
-            f.0.x -= window_size.x/2.25;
-            f.0.y -= -window_size.y/4.0;
-        });
-    }
-    
-    fn translate_bounding_box_relative_to_coordinate(&mut self, window_size: Vec2) {
-        for (i,point) in self.bounding_box.iter_mut().enumerate() {
-            if i % 2 == 0 {
-                *point -=  window_size.x/2.25;
-            } else {
-                *point -= -window_size.y/4.0;
-            }
-        }
-    }
-}
 #[derive(Default)]
 pub struct FontData {
     pub reader: FontReader,
@@ -151,7 +133,6 @@ impl FontData {
 
     pub fn get_glyphs(
         &mut self,
-        window_size: Vec2,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // GET FONT SCALE BEFORE THAT
         let prev_location = self.reader.get_location();
@@ -253,10 +234,7 @@ impl FontData {
                 }
 
                 let coordinates = get_coordinates(&mut self.reader, &flags, self.font_scale)?;
-                let mut glyph = Glyph { coordinates, contour_end_pts, contour_coordinates: Vec::with_capacity(n_contours), bounding_box: [x_min,y_min,x_max,y_max] };
-                glyph.translate_towards_top_left(window_size);
-                glyph.translate_bounding_box_relative_to_coordinate(window_size);
-                self.glyphs.push(glyph);
+                self.glyphs.push(Glyph { coordinates, contour_end_pts, contour_coordinates: Vec::with_capacity(n_contours), bounding_box: [x_min,y_min,x_max,y_max] });
             }
         }
 
@@ -294,10 +272,8 @@ impl FontData {
                 
                 last_end_point += *glyph.contour_end_pts.last().unwrap_or(&0) + 1;
             }
-
-            let mut glyph = Glyph { coordinates: new_coordinates, contour_end_pts: new_contour_end_pts, contour_coordinates: Vec::with_capacity(5), bounding_box: bounding_box.unwrap() };
-            glyph.translate_bounding_box_relative_to_coordinate(window_size);
-            self.glyphs[insert_at] = glyph;
+            
+            self.glyphs[insert_at] = Glyph { coordinates: new_coordinates, contour_end_pts: new_contour_end_pts, contour_coordinates: Vec::with_capacity(5), bounding_box: bounding_box.unwrap() };
         }
         Ok(())
     }

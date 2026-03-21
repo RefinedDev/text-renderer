@@ -149,7 +149,7 @@ fn render_text(
     let (x_min, y_min, x_max, y_max) = (world_min.x, world_max.y, world_max.x, world_min.y); // weird as fuck i know
 
     let mut padding = Vec2::new(0.0, 0.0);
-    let w_size = window.size().x;
+    let w_size = window.width();
 
     let font_scale = fontscale_and_lineheight.0;
     let line_height = fontscale_and_lineheight.1;
@@ -163,7 +163,7 @@ fn render_text(
             total_width_needed += *glyph_advanced_width as f32 * font_scale;
         }
 
-        if padding.x + total_width_needed > w_size * 0.9 {
+        if padding.x + total_width_needed > w_size*0.95 {
             padding.x = 0.0;
             padding.y += line_height;
         }
@@ -200,7 +200,7 @@ fn render_text(
            }
 
             padding.x += *glyph_advanced_width * font_scale;
-            if padding.x > w_size*0.9 {
+            if padding.x > w_size*0.95 {
                 padding.x = 0.0;
                 padding.y += line_height;
             }
@@ -209,10 +209,10 @@ fn render_text(
     }
 }
 
-fn spawn(window: Single<&Window>, mut commands: Commands) {
+fn spawn(mut commands: Commands) {
     commands.spawn(Camera2d);
 
-    let reader = FontReader::new("using.ttf").unwrap();
+    let reader = FontReader::new("fonts/using.ttf").unwrap();
     let mut font_data_parser = FontData {
         reader,
         ..default()
@@ -220,7 +220,7 @@ fn spawn(window: Single<&Window>, mut commands: Commands) {
 
     font_data_parser.get_lookup_table().unwrap();
     font_data_parser.get_glyph_location().unwrap();
-    font_data_parser.get_glyphs(window.size()).unwrap();
+    font_data_parser.get_glyphs().unwrap();
     font_data_parser.map_glyph_to_unicode().unwrap();
     font_data_parser.get_glyph_spacings().unwrap();
     setup_implied_points(&mut font_data_parser.glyphs);
@@ -245,12 +245,13 @@ fn go_to_cursor(
     mut camera: Single<(&mut Transform, &GlobalTransform, &Camera), With<Camera>>,
     window: Single<&Window>,
     time: Res<Time>,
-    mut looking_at: Local<Vec3>,
+    mut looking_at: Local<Option<Vec3>>,
 ) {
+    let look_at = looking_at.get_or_insert(Vec3::new(window.width()*0.5,-window.height()*0.35,0.0));
     camera
         .0
         .translation
-        .smooth_nudge(&looking_at, 15., time.delta_secs());
+        .smooth_nudge(look_at, 15., time.delta_secs());
 
     if buttons.just_pressed(MouseButton::Left) {
         let cursor_position = window.cursor_position().expect("could not get cursor pos");
@@ -258,7 +259,7 @@ fn go_to_cursor(
             .2
             .viewport_to_world_2d(camera.1, cursor_position)
             .unwrap();
-        *looking_at = Vec3::new(wrt_world.x, wrt_world.y, camera.0.translation.z);
+        *looking_at = Some(Vec3::new(wrt_world.x, wrt_world.y, camera.0.translation.z));
     }
 }
 
