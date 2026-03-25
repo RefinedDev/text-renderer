@@ -1,18 +1,23 @@
 mod font_reader;
 mod font_table_parser;
+mod frame;
+mod input_handle;
+mod renderer;
 
+use frame::TextFrame;
 use core::f32;
 use std::collections::HashMap;
 
 use font_reader::FontReader;
 use font_table_parser::{FontData, Glyph};
+use renderer::render_text;
 
 use bevy::{
-    color::palettes::css::{BLUE, GREEN, RED, WHITE}, 
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin}, 
-    input::mouse::AccumulatedMouseScroll, 
+    diagnostic::FrameTimeDiagnosticsPlugin, 
     prelude::*
 };
+
+use crate::input_handle::{go_to_cursor, zoom_cam, input_stuff};
 
 #[derive(Resource)]
 struct GlyphData(Vec<Glyph>);
@@ -27,52 +32,22 @@ struct GlyphSpaces(Vec<f32>);
 struct FontScaleANDLineHeight(f32, f32);
 
 #[derive(Resource)]
-struct Debug(bool); // RED MEANS ONCURVE; GREEN MEANS OFFCURVE; BLUE MEANS IMPLIED POINT
+struct Frames(Vec<TextFrame>);
 
 #[derive(Resource)]
-struct ScreenText(String, bool);
+struct Debug(bool); // RED MEANS ONCURVE; GREEN MEANS OFFCURVE; BLUE MEANS IMPLIED POINT
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     App::new()
-        .add_plugins((
-            DefaultPlugins,
-            FpsOverlayPlugin {
-                config: FpsOverlayConfig {
-                    text_config: TextFont {
-                        font_size: 10.0,
-                        ..default()
-                    },
-                    text_color: Color::linear_rgb(0.0, 255.0, 0.0),
-                    enabled: true,
-                    ..default()
-                },
-            },
-        ))
-        .add_systems(Startup, (setup_window, spawn).chain())
-        .add_systems(Update, (render_text, zoom_cam, go_to_cursor, input_stuff).chain())
+        .add_plugins((DefaultPlugins, FrameTimeDiagnosticsPlugin::default()))
+        .add_systems(Startup, (setup_window, load_assets).chain())
+        .add_systems(Update, (go_to_cursor, zoom_cam, render_text, input_stuff).chain())
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(Debug(false))
-        .insert_resource(ScreenText(String::from("Àáâäãå āăą çćč ďđ èéêë ēėę ìíîï īį ñń òóôöõ ø ō ő ùúûü ū ů ýÿ žźż. ` !@#$%^&*()[]/><,."), false))
+        .insert_resource(Frames(Vec::new()))
         .run();
 
     Ok(())
-}
-
-const CURVE_RES: usize = 3;
-fn quadratic_curve(a: Vec2, b: Vec2, c: Vec2, alpha: f32) -> Vec2 {
-    let p0 = a.lerp(b, alpha);
-    let p1 = b.lerp(c, alpha);
-    p0.lerp(p1, alpha)
-}
-
-fn draw_curve(a: Vec2, b: Vec2, c: Vec2, gizmos: &mut Gizmos) {
-    let mut previous_point = a;
-    for i in 0..CURVE_RES {
-        let alpha = (i+1) as f32/CURVE_RES as f32;
-        let next_point = quadratic_curve(a, b, c, alpha);
-        gizmos.line_2d(previous_point, next_point, WHITE);
-        previous_point = next_point;
-    }
 }
 
 fn setup_implied_points(glyph_data: &mut Vec<Glyph>) {
@@ -130,86 +105,7 @@ fn setup_implied_points(glyph_data: &mut Vec<Glyph>) {
     }
 }
 
-fn render_text(
-    mut gizmos: Gizmos,
-    window: Single<&Window>,
-    glyph_data: Res<GlyphData>,
-    glyph_unicodes: Res<GlyphUnicode>,
-    glyph_spaces: Res<GlyphSpaces>,
-    fontscale_and_lineheight: Res<FontScaleANDLineHeight>,
-    debugging: Res<Debug>,
-    screen_text: Res<ScreenText>,
-
-    camera: Single<(&GlobalTransform, &Camera), With<Camera>>,
-) {
-    let min = Vec2::new(-125.0,-125.0);
-    let max = Vec2::new(window.width()*1.4, window.height()*1.4);
-    let world_min = camera.1.viewport_to_world_2d(camera.0, min).unwrap();
-    let world_max = camera.1.viewport_to_world_2d(camera.0, max).unwrap();
-    let (x_min, y_min, x_max, y_max) = (world_min.x, world_max.y, world_max.x, world_min.y); // weird as fuck i know
-
-    let mut padding = Vec2::new(0.0, 0.0);
-    let w_size = window.width();
-
-    let font_scale = fontscale_and_lineheight.0;
-    let line_height = fontscale_and_lineheight.1;
-    for word in screen_text.0.split_ascii_whitespace().into_iter() {
-        let mut total_width_needed: f32 = 0.0;
-        
-        for char in word.chars().into_iter() {
-            let unicode = char as u32;
-            let glyph_index = glyph_unicodes.0[&unicode];
-            let glyph_advanced_width = &glyph_spaces.0[glyph_index];
-            total_width_needed += *glyph_advanced_width as f32 * font_scale;
-        }
-
-        if padding.x + total_width_needed > w_size*0.95 {
-            padding.x = 0.0;
-            padding.y += line_height;
-        }
-
-        for char in word.chars().into_iter() {
-            let unicode = char as u32;
-            let glyph_index = glyph_unicodes.0[&unicode];
-            let contour_coordinates = &glyph_data.0[glyph_index].contour_coordinates;
-            let glyph_advanced_width = &glyph_spaces.0[glyph_index];
-            let bounding_box = &glyph_data.0[glyph_index].bounding_box;
-            
-            for contour_with_implied_points in contour_coordinates {
-                if bounding_box[0]+padding.x < x_min || bounding_box[1]+padding.y < y_min || bounding_box[2]+padding.x > x_max || bounding_box[3]+padding.y > y_max {
-                    break;
-                }
-
-                let mut i = 0;
-                let length = contour_with_implied_points.len();
-                while i < length {
-                    let a = contour_with_implied_points[i];
-                    let b = contour_with_implied_points[(i + 1) % length];
-                    let c =contour_with_implied_points[(i + 2) % length];
-                    let (p1,p2,p3) = (a.0+padding, b.0+padding,c.0+padding);
-                 
-                    draw_curve(p1, p2, p3, &mut gizmos);
-                    if debugging.0 {
-                        gizmos.circle_2d(p1, 0.5, if a.1==0 { RED } else if a.1==1 { GREEN } else {BLUE});
-                        gizmos.circle_2d(p2, 0.5, if b.1==0 { RED } else if b.1==1 { GREEN } else {BLUE});
-                        gizmos.circle_2d(p3, 0.5, if c.1==0 { RED } else if c.1==1 { GREEN } else {BLUE});
-                    }
-                    
-                    i += 2;
-                }
-           }
-
-            padding.x += *glyph_advanced_width * font_scale;
-            if padding.x > w_size*0.95 {
-                padding.x = 0.0;
-                padding.y += line_height;
-            }
-        }
-        padding.x += 30.0; // whitespace
-    }
-}
-
-fn spawn(mut commands: Commands) {
+fn load_assets(mut commands: Commands) {
     commands.spawn(Camera2d);
 
     let reader = FontReader::new("fonts/using.ttf").unwrap();
@@ -231,73 +127,36 @@ fn spawn(mut commands: Commands) {
     commands.insert_resource(GlyphSpaces(font_data_parser.glyph_spaces));
 }
 
-fn zoom_cam(
-    mut camera: Single<&mut OrthographicProjection, With<Camera>>,
-    mouse_wheel: Res<AccumulatedMouseScroll>,
-) {
-    let delta_zoom = -mouse_wheel.delta.y * 0.2;
-    let multiplicative_zoom = 1. + delta_zoom;
-    camera.scale = (camera.scale * multiplicative_zoom).clamp(0.15, 2.0);
-}
-
-fn go_to_cursor(
-    buttons: Res<ButtonInput<MouseButton>>,
-    mut camera: Single<(&mut Transform, &GlobalTransform, &Camera), With<Camera>>,
+fn setup_frames(
+    camera: Single<(&GlobalTransform, &Camera), With<Camera>>, 
+    mut frames: ResMut<Frames>,
     window: Single<&Window>,
-    time: Res<Time>,
-    mut looking_at: Local<Option<Vec3>>,
 ) {
-    let look_at = looking_at.get_or_insert(Vec3::new(window.width()*0.5,-window.height()*0.35,0.0));
-    camera
-        .0
-        .translation
-        .smooth_nudge(look_at, 15., time.delta_secs());
-
-    if buttons.just_pressed(MouseButton::Left) {
-        let cursor_position = window.cursor_position().expect("could not get cursor pos");
-        let wrt_world = camera
-            .2
-            .viewport_to_world_2d(camera.1, cursor_position)
-            .unwrap();
-        *looking_at = Some(Vec3::new(wrt_world.x, wrt_world.y, camera.0.translation.z));
-    }
-}
-
-fn keycode_to_string(key: &KeyCode) -> String {
-    let debug = format!("{:?}", key);
-    if let Some(s) = debug.strip_prefix("Key") {
-        s.to_string()
-    } else if let Some(s) = debug.strip_prefix("Digit") {
-        s.to_string()
-    } else {
-        String::from("skip")   
-    }
-}
-
-fn input_stuff(mut debug: ResMut<Debug>, mut screentext: ResMut<ScreenText>, keyboard_input: Res<ButtonInput<KeyCode>>) {
-    if keyboard_input.just_pressed(KeyCode::CapsLock) {
-        debug.0 = !debug.0;
-    } else if keyboard_input.just_pressed(KeyCode::Tab) {
-        screentext.1 = !screentext.1;
-    } else if screentext.1 && keyboard_input.just_pressed(KeyCode::Backspace) && !screentext.0.is_empty() {
-        screentext.0.pop();
-    } else if screentext.1 && keyboard_input.just_pressed(KeyCode::Space) {
-        screentext.0.push(' ');
-    } else if screentext.1 && keyboard_input.pressed(KeyCode::ShiftRight) { // funny
-        screentext.0.push('E');
-    } else if screentext.1 {
-        let just_pressed = keyboard_input.get_just_pressed();
-        let holding_shift = keyboard_input.pressed(KeyCode::ShiftLeft);
-        for key in just_pressed.into_iter() {
-            let s = keycode_to_string(key);
-            if s == "skip" { continue }
-            let cased = if holding_shift {&s} else {&(s.to_lowercase())};
-            screentext.0.push_str(cased);
-        }
-    }
+    let screen_dimensions = window.size();
+    let fps_display = TextFrame::new("fps".to_string(),"FPS: 212".to_string(), Vec2::new(0.1,0.05), Vec2::new(0.05,0.025), true, Some(0.3)).setup_bounds(screen_dimensions, &camera);
+    let current_frame_display = TextFrame::new("current_frame".to_string(),"big chungus is big hot".to_string(), Vec2::new(0.2,0.05), Vec2::new(0.9,0.025), true, Some(0.3)).setup_bounds(screen_dimensions, &camera);
+    let screen = TextFrame::new("screen".to_string(),"The naïve Noël café-owner’s façade was façade-ish; he créped his crêpes with brio while his learnèd, résumé-wielding pâtissier, Zoë, façaded a façade in the Hôtel de Ville.".to_string(), Vec2::new(1.0,0.9), Vec2::new(0.5,0.5), true, Some(0.5)).setup_bounds(screen_dimensions, &camera);
+    let m = TextFrame::new("m".to_string(),"big money".to_string(), Vec2::new(0.6,0.3), Vec2::new(0.6,0.8), false, None).setup_bounds(screen_dimensions, &camera);
+    frames.0.push(fps_display);
+    frames.0.push(current_frame_display);
+    frames.0.push(screen);
+    frames.0.push(m)
 }
 
 fn setup_window(mut window: Single<&mut Window>) {
     window.title = String::from("Text Rendering");
     window.position = WindowPosition::Centered(MonitorSelection::Current);
 }
+
+// fn on_window_resize(
+//     mut resize_events: EventReader<bevy::window::WindowResized>,
+//     mut frames: ResMut<Frames>,
+//     camera: Single<(&GlobalTransform, &Camera), With<Camera>>,
+//     window: Single<&Window>,
+// ) {
+//     if resize_events.read().len() != 0 {
+//         for frame in frames.0.iter_mut() {
+//             frame.update(window.size(), camera.0, camera.1);
+//         }
+//     }
+// }
