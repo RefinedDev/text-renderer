@@ -28,14 +28,17 @@ pub fn go_to_cursor(
         *looking_at = Vec3::new(wrt_world.x, wrt_world.y, camera.0.translation.z);
     }
 
-    if camera.0.translation != *looking_at {
-        camera.0.translation.smooth_nudge(&looking_at, 15., time.delta_secs());
+    camera
+        .0
+        .translation
+        .smooth_nudge(&looking_at, 15., time.delta_secs());
 
-        let global_t = GlobalTransform::from(*camera.0);
-        for frame in frames.0.iter_mut() {
-            if !frame.locked {continue}
-            frame.update(window.size(), &global_t, camera.2); // cant use camera.1 instead of global_t because it isnt updated till PostUpdate
+    let global_t = GlobalTransform::from(*camera.0);
+    for frame in frames.0.iter_mut() {
+        if !frame.locked {
+            continue;
         }
+        frame.update(window.size(), &global_t, camera.2); // cant use camera.1 instead of global_t because it isnt updated till PostUpdate
     }
 }
 
@@ -80,9 +83,6 @@ pub fn input_stuff(
             *frame_index = 2; // // ignore fps and current_frame_display
         }
         *current_frame_name = frames.0[*frame_index].name.clone();
-
-    // } else if keyboard_input.pressed(KeyCode::ArrowLeft) {
-    //     current_frame.angle -= 0.01;
     } else if *writing && keyboard_input.just_pressed(KeyCode::Backspace) && !current_frame.text.is_empty() {
         current_frame.text.pop();
     } else if *writing && keyboard_input.just_pressed(KeyCode::Space) {

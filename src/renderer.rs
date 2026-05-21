@@ -63,10 +63,10 @@ pub fn render_text(
         let font_scale = fontscale_and_lineheight.0 * frame.frame_scale;
         let line_height = fontscale_and_lineheight.1 * frame.frame_scale;
 
-        let w_size = frame.t_right.x - frame.b_left.x;
+        let frame_width = frame.t_right.distance(frame.t_left);
         let mut padding = Vec2::new(0.0, line_height);
-        let frame_offset = frame.t_left;
-
+        let text_anchor = frame.t_left; // change this along with the padding to anchor the text on some part of the frame
+        
         for word in frame.text.split_whitespace() {
             let mut total_width_needed: f32 = 0.0;
     
@@ -77,7 +77,7 @@ pub fn render_text(
                 total_width_needed += *glyph_advanced_width as f32 * font_scale;
             }
 
-            if padding.x + total_width_needed > w_size*0.95 {
+            if padding.x + total_width_needed > frame_width*0.95 {
                 padding.x = 0.0;
                 padding.y += line_height;
             }
@@ -89,16 +89,16 @@ pub fn render_text(
                 let glyph_advanced_width = &glyph_spaces.0[glyph_index];
                 let bounding_box = &glyph_data.0[glyph_index].bounding_box; // (x_min, y_min, x_max, y_max)
                
-               let bb_x_min = bounding_box[0] * frame.frame_scale + padding.x + frame_offset.x;
-               let bb_y_min = bounding_box[1] * frame.frame_scale + padding.y + frame_offset.y;
-               let bb_x_max = bounding_box[2] * frame.frame_scale + padding.x + frame_offset.x;
-               let bb_y_max = bounding_box[3] * frame.frame_scale + padding.y + frame_offset.y;
+               let bb_x_min = bounding_box[0] * frame.frame_scale + padding.x + text_anchor.x;
+               let bb_y_min = bounding_box[1] * frame.frame_scale + padding.y + text_anchor.y;
+               let bb_x_max = bounding_box[2] * frame.frame_scale + padding.x + text_anchor.x;
+               let bb_y_max = bounding_box[3] * frame.frame_scale + padding.y + text_anchor.y;
                 for contour_with_implied_points in contour_coordinates {
                     if 
                         bb_x_min < x_min 
                         // || bb_x_min < frame.b_left.x 
                         || bb_y_min < y_min 
-                        || bb_y_min < frame.b_left.y // any glyphs below the frame wont render (im letting the ones who MIGHT overflow (slightly) from the sides render)
+                        || bb_y_min < frame.b_left.y.min(frame.t_right.y) // any glyphs below the frame wont render (im letting the ones who MIGHT overflow (slightly) from the sides render)
                         ||bb_x_max > x_max 
                         // || bb_x_max > frame.t_right.x 
                         || bb_y_max > y_max 
@@ -115,9 +115,9 @@ pub fn render_text(
                         let c =contour_with_implied_points[(i + 2) % length];
                         let (p1,p2,p3) = 
                         (
-                            a.0*frame.frame_scale + padding + frame_offset, 
-                            b.0*frame.frame_scale + padding + frame_offset,
-                            c.0*frame.frame_scale + padding + frame_offset
+                            a.0*frame.frame_scale + padding + text_anchor, 
+                            b.0*frame.frame_scale + padding + text_anchor,
+                            c.0*frame.frame_scale + padding + text_anchor
                         );
                     
                         draw_curve(p1, p2, p3, &mut gizmos);
@@ -132,7 +132,7 @@ pub fn render_text(
             }
 
                 padding.x += glyph_advanced_width * font_scale;
-                if padding.x > w_size*0.95 {
+                if padding.x > frame_width*0.95 {
                     padding.x = 0.0;
                     padding.y += line_height;
                 }
