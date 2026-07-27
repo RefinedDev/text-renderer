@@ -1,8 +1,10 @@
-dont think ill finish this project fully but most things work now, i just didnt implement filling the texts themselves with colour<br>
-most TTF fonts will render just fine.<br>
-there are also frames, you can put text in them and put them anywhere on the screen<br>
-click to move, scroll wheel to zoom<br>
-inspiration was Sebastian Lague's video on text rendering<br>
+## Rendering texts by [parsing TrueType](https://developer.apple.com/fonts/TrueType-Reference-Manual/) (.ttf) font files<br>
+- Click to move around the viewport<br>
+- Use scroll wheel to zoom in on a glyph<br>
+- Caps Lock to enter debug mode where you can see all the contour points and how they connect to form glyphs<br>
 
-<img width="1161" height="339" alt="imag2e" src="https://github.com/user-attachments/assets/eed7935d-4648-4aaf-9ed4-6b2ea813e428" />
-<img width="1582" height="777" alt="image" src="https://github.com/user-attachments/assets/48cc27c2-b568-4da7-a00e-86b93909c223" />
+Inspiration was Sebastian Lague's video on [Text Rendering](https://www.youtube.com/watch?v=SO83KQuuZvg)<br>
+
+## Showcase
+<img width="580" height="169" alt="imag2e" src="https://github.com/user-attachments/assets/eed7935d-4648-4aaf-9ed4-6b2ea813e428" />
+<img width="791" height="388" alt="image" src="https://github.com/user-attachments/assets/48cc27c2-b568-4da7-a00e-86b93909c223" />
